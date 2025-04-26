@@ -57,6 +57,9 @@ async def main():
             "batch_type": "Bohrium",
             "context_type": "Bohrium",
             "remote_profile": {
+                "email": os.environ.get("BOHRIUM_USERNAME"),
+                "password": os.environ.get("BOHRIUM_PASSWORD"),
+                "program_id": int(os.environ.get("BOHRIUM_PROJECT_ID")),
                 "input_data": {
                     "image_name": "registry.dp.tech/dptech/ubuntu:22.04-py3.10",
                     "job_type": "container",
@@ -68,16 +71,14 @@ async def main():
     }
     storage = {
         "type": "bohrium",
+        "username": os.environ.get("BOHRIUM_USERNAME"),
+        "password": os.environ.get("BOHRIUM_PASSWORD"),
+        "project_id": int(os.environ.get("BOHRIUM_PROJECT_ID")),
     }
     client = MCPClient()
     try:
         await client.connect_to_server(
             "server.py",
-            env={
-                "BOHRIUM_USERNAME": os.environ.get("BOHRIUM_USERNAME"),
-                "BOHRIUM_PASSWORD": os.environ.get("BOHRIUM_PASSWORD"),
-                "BOHRIUM_PROJECT_ID": os.environ.get("BOHRIUM_PROJECT_ID"),
-            },
         )
         result = await client.call_tool(
             "run_dp_train",
