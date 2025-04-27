@@ -34,7 +34,9 @@ class DispatcherExecutor(BaseExecutor):
         machine=None,
         resources=None,
         python_packages=None,
+        pip_packages=None,
         python_executable="python3",
+        DEFAULT_FORWARD_DIR = "dispatcher_assets",
     ):
         self.machine = machine or {}
         self.resources = resources or {}
@@ -42,6 +44,8 @@ class DispatcherExecutor(BaseExecutor):
         self.python_packages.extend(__path__)
         self.python_packages.extend(jsonpickle.__path__)
         self.python_executable = python_executable
+        self.pip_packages = pip_packages or []
+        self.DEFAULT_FORWARD_DIR = DEFAULT_FORWARD_DIR
         self.set_defaults()
 
     def set_defaults(self):
@@ -62,6 +66,14 @@ class DispatcherExecutor(BaseExecutor):
 
     def submit(self, fn, kwargs):
         script = ""
+        script += "import os, sys, subprocess\n"
+        if self.pip_packages:
+            script += "subprocess.check_call([sys.executable, '-m', 'pip', 'install', "
+            for pip_package in self.pip_packages:
+                script += "'%s', " % pip_package
+            script += "])\n"
+
+
         fn_name = fn.__name__
         module_name = fn.__module__
         if module_name in ["__main__", "__mp_main__"]:
@@ -85,6 +97,7 @@ class DispatcherExecutor(BaseExecutor):
             f.write(script)
 
         forward_files = ["script.py"]
+        forward_files.extend(self.DEFAULT_FORWARD_DIR)
         for package in self.python_packages:
             target = os.path.basename(package)
             if os.path.abspath(package) != os.path.abspath(target):
