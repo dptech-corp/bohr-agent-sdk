@@ -28,6 +28,8 @@ setup(
         "python-dotenv>=1.0.0",  # 环境变量管理
         "typing-extensions>=4.8.0",  # 额外的类型提示功能
         "aiohttp>=3.9.1",        # 异步HTTP客户端
+        "dpdispatcher",         #DPDispatcher
+        "lbg",             #lbg
     ],
     # extras_require={
     #     "dev": [
