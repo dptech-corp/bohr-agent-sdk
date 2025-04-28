@@ -49,85 +49,15 @@ class CalculationMCPClient(MCPClient):
         return kwargs
 
     def generate_function_from_mcp_tool(self, mcp_tool: "Tool") -> Callable:
-        func_name = mcp_tool.name
-        func_desc = mcp_tool.description or "No description provided."
-        parameters_schema = mcp_tool.inputSchema.get("properties", {})
-        required_params = mcp_tool.inputSchema.get("required", [])
+        base_fn: Callable = super().generate_function_from_mcp_tool(mcp_tool)
 
-        type_map = {
-            "string": str,
-            "integer": int,
-            "number": float,
-            "boolean": bool,
-            "array": list,
-            "object": dict,
-        }
-        annotations = {}
-        defaults: Dict[str, Any] = {}
-
-        for param_name, param_schema in parameters_schema.items():
-            param_type = param_schema.get("type", "Any")
-            param_type = type_map.get(param_type, Any)
-            annotations[param_name] = param_type
-            if param_name not in required_params:
-                defaults[param_name] = None
-
-        async def dynamic_function(**kwargs):
-            from mcp.types import CallToolResult
-
+        @functools.wraps(base_fn)  
+        async def wrapper(**kwargs):
             kwargs = self._merge_default_args(kwargs)
+            return await base_fn(**kwargs)
 
-            missing_params: Set[str] = set(required_params) - set(kwargs.keys())
-            if missing_params:
-                logger.warning(f"Missing required parameters: {missing_params}")
-                return "Missing required parameters."
-
-            if not self._session:
-                logger.error("MCP Client is not connected. Call `connection()` first.")
-                raise RuntimeError("MCP Client is not connected. Call `connection()` first.")
-
-            try:
-                result: CallToolResult = await self._session.call_tool(func_name, kwargs)
-            except Exception as e:
-                logger.error(f"Failed to call MCP tool '{func_name}': {e!s}")
-                raise e
-
-            if not result.content or len(result.content) == 0:
-                return "No data available for this request."
-
-            try:
-                content = result.content[0]
-                if content.type == "text":
-                    return content.text
-                elif content.type == "image":
-                    if hasattr(content, "url") and content.url:
-                        return f"Image available at: {content.url}"
-                    return "Image content received (data URI not shown)"
-                elif content.type == "embedded_resource":
-                    if hasattr(content, "name") and content.name:
-                        return f"Embedded resource: {content.name}"
-                    return "Embedded resource received"
-                else:
-                    return f"Received content of type '{content.type}' which is not fully supported yet."
-            except (IndexError, AttributeError) as e:
-                logger.error(f"Error processing content from MCP tool response: {e!s}")
-                raise e
-
-        dynamic_function.__name__ = func_name
-        dynamic_function.__doc__ = func_desc
-        dynamic_function.__annotations__ = annotations
-
-        sig = inspect.Signature(
-            parameters=[
-                inspect.Parameter(
-                    name=param,
-                    kind=inspect.Parameter.KEYWORD_ONLY,
-                    default=(None if param in ("executor", "storage") else defaults.get(param, inspect.Parameter.empty)),
-                    annotation=annotations[param],
-                )
-                for param in parameters_schema.keys()
-            ]
-        )
-        dynamic_function.__signature__ = sig
-
-        return dynamic_function
+        wrapper.__signature__ = base_fn.__signature__
+        wrapper.__doc__ = base_fn.__doc__
+        wrapper.__annotations__ = base_fn.__annotations__
+        wrapper.__name__ = base_fn.__name__
+        return wrapper
