@@ -38,6 +38,16 @@ class DispatcherExecutor(BaseExecutor):
         python_executable="python3",
         DEFAULT_FORWARD_DIR = "dispatcher_assets",
     ):
+        """Use DPDispatcher to execute the tool
+        Refer to https://docs.deepmodeling.com/projects/dpdispatcher.
+
+        Args:
+            machine: The machine configuration of DPDispatcher
+            resources: The resources configuration of DPDispatcher
+            python_packages: Additional python packages uploaded to runtime
+                environment
+            python_executable: Python executable path for running the tool
+        """
         self.machine = machine or {}
         self.resources = resources or {}
         self.python_packages = python_packages or []

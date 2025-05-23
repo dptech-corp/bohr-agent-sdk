@@ -19,6 +19,7 @@ class LocalExecutor(BaseExecutor):
 
     def submit(self, fn, kwargs):
         kwargs["fn"] = fn
+        os.environ["DP_AGENT_RUNNING_MODE"] = "1"
         p = Process(target=wrapped_fn, kwargs=kwargs)
         p.start()
         return str(p.pid)
@@ -26,7 +27,7 @@ class LocalExecutor(BaseExecutor):
     def query_status(self, job_id):
         try:
             p = psutil.Process(int(job_id))
-            if p.status() == "running":
+            if p.status() in ["running", "sleeping"]:
                 return "Running"
         except psutil.NoSuchProcess:
             pass

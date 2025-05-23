@@ -77,6 +77,19 @@ class BohriumStorage(BaseStorage):
             tiefblue_url: Optional[str] = None,
             ticket: Optional[str] = None,
     ) -> None:
+        """Bohrium storage interface
+
+        Args:
+            bohrium_url: The base URL of bohrium, https://bohrium.dp.tech by
+                default
+            username: The username of bohrium
+            password: The password of bohrium
+            authorization: The login authorization of bohrium
+            project_id: The project ID of bohrium
+            prefix: Artifact storage prefix in user's personal storage or
+                project storage
+            ticket: The ticket of bohrium
+        """
         self.bohrium_url = bohrium_url if bohrium_url is not None else \
             config["bohrium_url"]
         self.username = username if username is not None else \

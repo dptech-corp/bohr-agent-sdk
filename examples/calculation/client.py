@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 from typing import Optional
 from contextlib import AsyncExitStack
 
@@ -84,29 +83,6 @@ async def main():
             "run_dp_train",
             arguments={
                 "training_data": "bohrium://13756/27666/store/upload/training_data.tgz",
-                "storage": storage,
-                "executor": executor,
-            },
-        )
-        job_id = result.content[0].text
-        print("job_id", job_id)
-        while True:
-            result = await client.call_tool(
-                "query_job_status",
-                arguments={
-                    "job_id": job_id,
-                    "executor": executor,
-                },
-            )
-            status = result.content[0].text
-            print("status", status)
-            if status != "Running":
-                break
-            time.sleep(1)
-        result = await client.call_tool(
-            "get_job_results",
-            arguments={
-                "job_id": job_id,
                 "storage": storage,
                 "executor": executor,
             },

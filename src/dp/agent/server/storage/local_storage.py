@@ -12,7 +12,7 @@ class LocalStorage(BaseStorage):
     def _upload(self, key, path):
         os.makedirs(os.path.dirname(key), exist_ok=True)
         shutil.copy(path, key)
-        return key
+        return os.path.abspath(key)
 
     def _download(self, key, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)

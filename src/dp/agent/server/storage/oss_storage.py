@@ -15,6 +15,15 @@ class OSSStorage(BaseStorage):
             access_key_secret: Optional[str] = None,
             prefix: Optional[str] = None,
     ) -> None:
+        """OSS storage interface
+
+        Args:
+            endpoint: The OSS endpoint
+            bucket_name: The OSS bucket name
+            access_key_id: The OSS access key
+            access_key_secret: The OSS secret key
+            prefix: Artifact storage prefix in the OSS bucket
+        """
         if endpoint is None:
             endpoint = os.environ.get("OSS_ENDPOINT")
         if bucket_name is None:

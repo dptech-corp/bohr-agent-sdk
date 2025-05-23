@@ -6,10 +6,13 @@ class FakeCalculationMCPServer:
     def __init__(self, *args, **kwargs):
         pass
 
-    def tool(self):
+    def tool(self, *args, **kwargs):
         def decorator(fn):
             return fn
         return decorator
+
+    def run(self, *args, **kwargs):
+        return
 
 
 if RUNNING_MODE:

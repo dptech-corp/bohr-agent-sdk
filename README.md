@@ -7,7 +7,7 @@
 ### Linux/Mac
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/dptech-corp/science-agent-sdk/refs/heads/feat/clli/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/dptech-corp/science-agent-sdk/refs/heads/feat/master/install.sh | bash
 ```
 
 ### Windows
@@ -15,7 +15,7 @@ curl -sSL https://raw.githubusercontent.com/dptech-corp/science-agent-sdk/refs/h
 在PowerShell中运行：
 
 ```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/dptech-corp/science-agent-sdk/refs/heads/feat/clli/install.sh -OutFile install.sh
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/dptech-corp/science-agent-sdk/refs/heads/feat/master/install.sh -OutFile install.sh
 bash install.sh
 ```
 
@@ -108,80 +108,48 @@ class MyDevice(Device):
         )
 ```
 
-### 云模式开发
+### 云端开发
 
-云模式基于 MCP (Message Control Protocol) 实现，用于处理远程设备控制和任务调度。以下展示如何创建设备并注册到 MCP 服务器：
-
-```python
-from typing import Optional
-from mcp.server.fastmcp import FastMCP
-from mcp.types import ServerNotification
-from dp.agent.cloud.mqtt import get_mqtt_cloud_instance
-from dp.agent.lab.device import Device, action, register_mcp_tools
-import logging
-import dotenv
-
-# 加载环境变量
-dotenv.load_dotenv()
-
-# 初始化日志
-logger = logging.getLogger("mcp")
-
-class MyMicroscope(Device):
-    device_name = "my_microscope"
-    
-    @action("take_picture")
-    def take_picture(self, params: dict) -> dict:
-        """拍照动作"""
-        return {
-            "message": "Picture taken",
-            "data": {"image_id": "test_123"}
-        }
-    
-    @action("move_stage")
-    def move_stage(self, params: dict) -> dict:
-        """移动样品台"""
-        return {
-            "message": "Stage moved",
-            "data": {"position": params}
-        }
-
-# 初始化 MCP 服务器和设备
-mcp = FastMCP("my_service")
-my_device = MyMicroscope()
-mqtt_cloud = get_mqtt_cloud_instance()
-
-# 注册设备的所有 actions 到 MCP 服务器
-register_mcp_tools(mcp, my_device)
-
-# 可以添加额外的 MCP 工具
-@mcp.tool()
-async def custom_operation() -> str:
-    """自定义操作"""
-    return "Custom operation executed"
-
-# 导出 MCP 实例
-def get_mcp_instance():
-    return mcp
-```
-
-工作流程：
-1. 创建设备类并继承 `Device`
-2. 使用 `@action` 装饰器定义设备动作
-3. 初始化 MCP 服务器和设备实例
-4. 使用 `register_mcp_tools` 注册设备动作
-5. 可选：添加额外的 MCP 工具
-
-注册后，设备的所有 actions 都会自动转换为 MCP 工具，可以通过 MQTT 远程调用。例如，`take_picture` action 可以这样调用：
+云模式基于 MCP (Message Control Protocol) 实现，用于处理远程设备控制和任务调度。register_mcp_tools 通过 python 的自省和反射机制实现了设备控制的自动注册，无需重复实现操作定义。
+以下展示如何创建设备并注册到 MCP 服务器：
 
 ```python
-# 在客户端使用已注册的工具
-request_id = mqtt_cloud.send_device_control(
-    device_name="my_microscope",
-    device_action="take_picture",
-    device_params={"horizontal_width": "1024"}
-)
+"""
+Example of using the science-agent-sdk cloud functionality.
+"""
+import signal
+import sys
+from dp.agent.cloud import mcp, get_mqtt_cloud_instance
+from dp.agent.lab.device import TescanDevice, register_mcp_tools
+from dp.agent.lab.device.device import register_mcp_tools
+
+def signal_handler(sig, frame):
+    """Handle SIGINT signal to gracefully shutdown."""
+    print("Shutting down...")
+    get_mqtt_cloud_instance().stop()
+    sys.exit(0)
+
+def main():
+    """Start the cloud services."""
+    print("Starting Tescan Device Twin Cloud Services...")
+    
+    # Register signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Create device instance
+    device = TescanDevice(mcp, device)
+    
+    # Register device tools
+    register_mcp_tools(device)
+    
+    # Start MCP server
+    print("Starting MCP server...")
+    mcp.run(transport="sse")
+
+if __name__ == "__main__":
+    main()
 ```
+
 
 ### 配置说明
 
