@@ -35,42 +35,98 @@ def scaffolding(type):
     # 获取用户当前工作目录
     current_dir = Path.cwd()
     
-    # 创建必要的目录结构
-    project_dirs = ['cloud', 'device']
-    for dir_name in project_dirs:
-        dst_dir = current_dir / dir_name
+    #判断需要创建哪种类型的文件夹
+    if type == 'cloud':
+        dir_name = current_dir / 'cloud'
+    elif type == 'device':
+        dir_name = current_dir / 'device'
+    elif type == 'calculation':
+        dir_name = current_dir / 'calculation'
         
-        if dst_dir.exists():
+    #判断文件夹是否存在，如果不存在则创建
+    if dir_name.exists():
             click.echo(f"Warning: {dir_name} already exists，skipping...")
             click.echo(f"If you want to create a new scaffold, please delete the existing project folder first.")
-            continue
-            
-        # 只创建目录，不复制SDK文件
-        dst_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 创建__init__.py文件以使目录成为Python包
-    for dir_name in project_dirs:
-        init_file = current_dir / dir_name / '__init__.py'
-        if not init_file.exists():
-            init_file.write_text('')
-    
-    # 从模板创建main.py文件
+    else:
+        dir_name.mkdir(parents=True, exist_ok=True)
+        
+    #在目标文件夹中创建init文件
+    init_file = current_dir / dir_name / '__init__.py'
+    if not init_file.exists():
+        init_file.write_text('')
+        
+    #从templates创建main.py文件
     main_template = templates_dir / 'main.py.template'
     main_file = current_dir / 'main.py'
     if not main_file.exists():
         shutil.copy2(main_template, main_file)
-    
-    # 从模板创建tescan_device.py文件
-    tescan_template = templates_dir / 'device' / 'tescan_device.py.template'
-    tescan_file = current_dir / 'device' / 'tescan_device.py'
-    if not tescan_file.exists():
-        shutil.copy2(tescan_template, tescan_file)
-        click.echo("\nCreated TescanDevice example implementation in device/tescan_device.py")
-        click.echo("Please modify this file according to your actual device control requirements.")
         
+    #如果是device则从模板创建tescan_device.py文件
+    if type == 'device':
+        tescan_template = templates_dir / 'device' / 'tescan_device.py.template'
+        tescan_file = current_dir / 'device' / 'tescan_device.py'
+        if not tescan_file.exists():
+            shutil.copy2(tescan_template, tescan_file)
+            click.echo("\nCreated TescanDevice example implementation in device/tescan_device.py")
+            click.echo("Please modify this file according to your actual device control requirements.")
+    elif type == 'calculation':
+        calculation_template = templates_dir / 'calculation' / 'simple.py.template'
+        calculation_file = current_dir / 'calculation' / 'simple.py'
+        if not calculation_file.exists():
+            shutil.copy2(calculation_template, calculation_file)
+            click.echo("\nCreated calculation example implementation in calculation/calculation.py")
+            click.echo("Please modify this file according to your actual calculation control requirements.")
+            
     click.echo("\nSucceed for fetching scaffold!")
-    click.echo("Now you can use dp-agent run-cloud or dp-agent run-device to run this project!")
-
+    click.echo("Now you can use dp-agent run tool , dp-agent run agent or dp-agent run debug to run this project!")
+    # 创建必要的目录结构
+    # project_dirs = ['cloud', 'device','calculation']
+    # for dir_name in project_dirs:
+    #     dst_dir = current_dir / dir_name
+        
+    #     if dst_dir.exists():
+    #         click.echo(f"Warning: {dir_name} already exists，skipping...")
+    #         click.echo(f"If you want to create a new scaffold, please delete the existing project folder first.")
+    #         continue
+            
+    #     # 只创建目录，不复制SDK文件
+    #     dst_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 创建__init__.py文件以使目录成为Python包
+    # for dir_name in project_dirs:
+    #     init_file = current_dir / dir_name / '__init__.py'
+    #     if not init_file.exists():
+    #         init_file.write_text('')
+    
+    # # 从模板创建main.py文件
+    # main_template = templates_dir / 'main.py.template'
+    # main_file = current_dir / 'main.py'
+    # if not main_file.exists():
+    #     shutil.copy2(main_template, main_file)
+    
+    # # 从模板创建tescan_device.py文件
+    # tescan_template = templates_dir / 'device' / 'tescan_device.py.template'
+    # tescan_file = current_dir / 'device' / 'tescan_device.py'
+    # if not tescan_file.exists():
+    #     shutil.copy2(tescan_template, tescan_file)
+    #     click.echo("\nCreated TescanDevice example implementation in device/tescan_device.py")
+    #     click.echo("Please modify this file according to your actual device control requirements.")
+        
+    
+    
+    # calculation_template = templates_dir / 'calculation' / 'simple.py.template'
+    # calculation_file = current_dir / 'calculation' / 'simple.py'
+    # if not calculation_file.exists():
+    #     shutil.copy2(calculation_template, calculation_file)
+    #     click.echo("\nCreated calculation example implementation in calculation/calculation.py")
+    #     click.echo("Please modify this file according to your actual calculation control requirements.")
+    
+    
+    
+    
+    # click.echo("\nSucceed for fetching scaffold!")
+    # click.echo("Now you can use dp-agent run-cloud or dp-agent run-device to run this project!")
+        
 @fetch.command()
 def config():
     """Fetch configuration files for the science agent.
@@ -88,7 +144,7 @@ def config():
     # env_template = templates_dir / '.env.template'
     # env_file = current_dir / '.env'
     
-    remote_env_url = 'https://openfiles.mlops.dp.tech/projects/bohrium-agent/7225627e6f74473fa2bdff58a0dbb584/env-public'
+    remote_env_url = 'https://openfiles.mlops.dp.tech/projects/bohrium-agent/69b192c8c9774a8b860ecb174a218c0b/env-public'
     env_file = Path.cwd() / '.env'
     
     if env_file.exists():

@@ -1,0 +1,15 @@
+from dp.agent.server import CalculationMCPServer
+
+# 创建 MCP Server 实例
+mcp = CalculationMCPServer("Demo", host="0.0.0.0", port=5001)
+
+# 用装饰器注册远程调用函数
+@mcp.tool()
+def add_numbers(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
+
+def run():
+    print("Starting MCP server on http://127.0.0.1:5001 ...")
+    mcp.run(transport="streamable-http")
+    

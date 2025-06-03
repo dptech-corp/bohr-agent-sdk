@@ -40,9 +40,17 @@ def run_device():
         print("\nShutting down lab environment...")
         sys.exit(0)
 
+def run_calculation():
+    """Run in calculation environment"""
+    # 在此实现你自己的计算环境逻辑
+    print("Running calculation task...")
+    # 模拟任务处理逻辑
+    from calculation import simple
+    simple.run()
+    
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python main.py [lab|cloud]")
+        print("Usage: python main.py [device|cloud|calculation]")
         sys.exit(1)
         
     mode = sys.argv[1]
@@ -50,7 +58,9 @@ if __name__ == "__main__":
         run_device()
     elif mode == "cloud":
         run_cloud()
+    elif mode == "calculation":  
+        run_calculation()
     else:
         print(f"Unknown mode: {mode}")
-        print("Usage: python main.py [device|cloud]")
+        print("Usage: python main.py [device|cloud|calculation]")
         sys.exit(1) 
