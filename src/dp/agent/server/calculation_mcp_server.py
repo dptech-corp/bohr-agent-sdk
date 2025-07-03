@@ -87,10 +87,13 @@ def terminate_job(job_id: str, executor: Optional[dict] = None):
 
 
 def handle_input_artifacts(fn, kwargs, storage):
+    logger.info("kwargs: %s" % kwargs)
     storage_type, storage = init_storage(storage)
     sig = inspect.signature(fn)
     input_artifacts = {}
     for name, param in sig.parameters.items():
+        logger.info("%s: %s %s" % (
+            name, param.annotation, param.annotation is Optional[Path]))
         if param.annotation is Path or (
             param.annotation is Optional[Path] and
                 kwargs.get(name) is not None):
