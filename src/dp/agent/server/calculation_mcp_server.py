@@ -6,7 +6,7 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Any, Literal, Optional, TypedDict
+from typing import Any, Literal, Optional, TypedDict, List
 
 import mcp
 from mcp.server.fastmcp import FastMCP
@@ -116,6 +116,26 @@ def handle_input_artifacts(fn, kwargs, storage):
                 "storage_type": scheme,
                 "uri": uri,
             }
+        elif param.annotation is List[Path] or (
+            param.annotation is Optional[List[Path]] and
+                kwargs.get(name) is not None):
+            uris = kwargs[name]
+            new_paths = []
+            for uri in uris:
+                scheme, key = parse_uri(uri)
+                if scheme == storage_type:
+                    s = storage
+                else:
+                    s = storage_dict[scheme]()
+                path = s.download(key, "inputs/%s" % name)
+                new_paths.append(Path(path))
+                logger.info("Artifact %s downloaded to %s" % (
+                    uri, path))
+            kwargs[name] = new_paths
+            input_artifacts[name] = {
+                "storage_type": storage_type,
+                "uri": uris,
+            }
     return kwargs, input_artifacts
 
 
@@ -134,6 +154,20 @@ def handle_output_artifacts(results, exec_id, storage):
                 output_artifacts[name] = {
                     "storage_type": storage_type,
                     "uri": uri,
+                }
+            elif isinstance(results[name], list) and all(isinstance(item, Path) for item in results[name]):
+                new_uris = []
+                for item in results[name]:
+                    key = storage.upload("%s/outputs/%s" % (exec_id, name),
+                                         item)
+                    uri = storage_type + "://" + key
+                    logger.info("Artifact %s uploaded to %s" % (
+                        item, uri))
+                    new_uris.append(uri)
+                results[name] = new_uris
+                output_artifacts[name] = {
+                    "storage_type": storage_type,
+                    "uri": new_uris,
                 }
     return results, output_artifacts
 
@@ -190,6 +224,14 @@ class CalculationMCPServer:
                     parameters.append(inspect.Parameter(
                         name=param.name, default=param.default,
                         annotation=Optional[str], kind=param.kind))
+                elif param.annotation is List[Path]:
+                    parameters.append(inspect.Parameter(
+                        name=param.name, default=param.default,
+                        annotation=List[str], kind=param.kind))
+                elif param.annotation is Optional[List[Path]]:
+                    parameters.append(inspect.Parameter(
+                        name=param.name, default=param.default,
+                        annotation=Optional[List[str]], kind=param.kind))
                 else:
                     parameters.append(param)
             for param in new_typed_signature.parameters.values():
