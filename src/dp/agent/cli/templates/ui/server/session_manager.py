@@ -479,11 +479,26 @@ class SessionManager:
                 logger.warning(f"⚠️ SessionService 已被清理，跳过 Runner 初始化: {runner_key}")
                 return
                 
-            runner = Runner(
-                agent=user_agent,
-                session_service=session_service,
-                app_name=self.app_name
-            )
+            # Try to dynamically create an artifact service from the user agent module.
+            artifact_service = None
+            try:
+                artifact_service = agentconfig.try_create_artifact_service(
+                    ak=context.access_key or "",
+                    app_key=context.app_key or "",
+                    project_id=project_id,
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ 创建 artifact_service 失败，将忽略并继续: {e}")
+
+            runner_kwargs = {
+                "agent": user_agent,
+                "session_service": session_service,
+                "app_name": self.app_name,
+            }
+            if artifact_service is not None:
+                runner_kwargs["artifact_service"] = artifact_service
+
+            runner = Runner(**runner_kwargs)
             
             self.runners[runner_key] = runner
             logger.info(f"✅ Runner 初始化成功: {runner_key}")

@@ -196,6 +196,56 @@ class AgentConfig:
         except Exception as e:
             logger.error(f"❌ 未知错误: {e}")
             raise Exception(f"Failed to load agent {agentname} from {module_path}: {e}")
+
+    def try_create_artifact_service(self, ak: str = None, app_key: str = None, project_id: int = None):
+        """Try to import and call create_artifact_service(ak, app_key, project_id) from agent module.
+
+        Returns the artifact service instance if available; otherwise returns None.
+        """
+        agentcfg = self.config.get("agent", {})
+        module_path = agentcfg.get("module", "agent.subagent")
+
+        try:
+            # Resolve module same as get_agent
+            if '/' in module_path or '\\' in module_path or module_path.endswith('.py'):
+                file_path = Path(module_path)
+                if not file_path.is_absolute():
+                    user_working_dir = os.environ.get('USER_WORKING_DIR', os.getcwd())
+                    file_path = Path(user_working_dir) / file_path
+                if not file_path.exists():
+                    logger.warning(f"artifact_service module file not found: {file_path}")
+                    return None
+                module_name = str(file_path).replace('/', '_').replace('\\', '_').replace('.py', '').replace('.', '_')
+                module_name = 'agent_' + module_name.strip('_')
+                spec = importlib.util.spec_from_file_location(module_name, str(file_path))
+                if spec is None or spec.loader is None:
+                    logger.warning(f"Cannot load module from file for artifact_service: {file_path}")
+                    return None
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+            else:
+                module = importlib.import_module(module_path)
+
+            if hasattr(module, 'create_artifact_service'):
+                import inspect
+                sig = inspect.signature(module.create_artifact_service)
+                params = {}
+                if 'ak' in sig.parameters:
+                    params['ak'] = ak
+                if 'app_key' in sig.parameters:
+                    params['app_key'] = app_key
+                if 'project_id' in sig.parameters:
+                    params['project_id'] = project_id
+                svc = module.create_artifact_service(**params)
+                logger.info("✅ 使用 agent.create_artifact_service 创建 artifact_service 成功")
+                return svc
+            else:
+                logger.info("ℹ️ agent 模块未提供 create_artifact_service，跳过设置 artifact_service")
+                return None
+        except Exception as e:
+            logger.warning(f"⚠️ 尝试创建 artifact_service 失败: {e}")
+            return None
     
     def get_ui_config(self) -> Dict[str, Any]:
         """Get UI-specific configuration"""
