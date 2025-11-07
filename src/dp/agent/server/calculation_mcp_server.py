@@ -111,7 +111,7 @@ def terminate_job(job_id: str, executor: Optional[dict] = None):
         logger.info("Job %s is terminated" % job_id)
 
 
-def handle_input_artifacts(fn, kwargs, storage):
+async def handle_input_artifacts(fn, kwargs, storage):
     storage_type, storage = init_storage(storage)
     sig = inspect.signature(fn)
     input_artifacts = {}
@@ -125,7 +125,7 @@ def handle_input_artifacts(fn, kwargs, storage):
                 s = storage
             else:
                 s = storage_dict[scheme]()
-            path = s.download(key, "inputs/%s" % name)
+            path = await s.async_download(key, "inputs/%s" % name)
             logger.info("Artifact %s downloaded to %s" % (
                 uri, path))
             kwargs[name] = Path(path)
@@ -136,14 +136,14 @@ def handle_input_artifacts(fn, kwargs, storage):
     return kwargs, input_artifacts
 
 
-def handle_output_artifacts(results, exec_id, storage):
+async def handle_output_artifacts(results, exec_id, storage):
     storage_type, storage = init_storage(storage)
     output_artifacts = {}
     if isinstance(results, dict):
         for name in results:
             if isinstance(results[name], Path):
-                key = storage.upload("%s/outputs/%s" % (exec_id, name),
-                                     results[name])
+                key = await storage.async_upload("%s/outputs/%s" % (
+                    exec_id, name), results[name])
                 uri = storage_type + "://" + key
                 logger.info("Artifact %s uploaded to %s" % (
                     results[name], uri))
@@ -157,8 +157,8 @@ def handle_output_artifacts(results, exec_id, storage):
 
 # MCP does not regard Any as serializable in Python 3.12
 # use Optional[Any] to work around
-def get_job_results(job_id: str, executor: Optional[dict] = None,
-                    storage: Optional[dict] = None) -> Optional[Any]:
+async def get_job_results(job_id: str, executor: Optional[dict] = None,
+                          storage: Optional[dict] = None) -> Optional[Any]:
     """
     Get results of a calculation job
     Args:
@@ -172,7 +172,7 @@ def get_job_results(job_id: str, executor: Optional[dict] = None,
         storage = load_storage(storage)
         _, executor = init_executor(executor)
         results = executor.get_results(exec_id)
-        results, output_artifacts = handle_output_artifacts(
+        results, output_artifacts = await handle_output_artifacts(
             results, exec_id, storage)
         logger.info("Job %s result is %s" % (job_id, results))
     return JobResult(result=results, job_info={
@@ -258,10 +258,10 @@ class CalculationMCPServer:
             preprocess_func = self.preprocess_func
 
         def decorator(fn: Callable) -> Callable:
-            def submit_job(executor: Optional[dict] = None,
-                           storage: Optional[dict] = None,
-                           **kwargs) -> TypedDict("results", {
-                               "job_id": str, "extra_info": Optional[dict]}):
+            async def submit_job(executor: Optional[dict] = None,
+                                 storage: Optional[dict] = None,
+                                 **kwargs) -> TypedDict("results", {
+                    "job_id": str, "extra_info": Optional[dict]}):
                 trace_id = datetime.today().strftime('%Y-%m-%d-%H:%M:%S.%f')
                 logger.info("Job processing (Trace ID: %s)" % trace_id)
                 with set_directory(trace_id):
@@ -274,7 +274,7 @@ class CalculationMCPServer:
                     if storage:
                         with open("storage.json", "w") as f:
                             json.dump(storage, f, indent=4)
-                    kwargs, input_artifacts = handle_input_artifacts(
+                    kwargs, input_artifacts = await handle_input_artifacts(
                         fn, kwargs, storage)
                     executor_type, executor = init_executor(executor)
                     res = executor.submit(fn, kwargs)
@@ -302,7 +302,7 @@ class CalculationMCPServer:
                     if preprocess_func is not None:
                         executor, storage, kwargs = preprocess_func(
                             executor, storage, kwargs)
-                    kwargs, input_artifacts = handle_input_artifacts(
+                    kwargs, input_artifacts = await handle_input_artifacts(
                         fn, kwargs, storage)
                     executor_type, executor = init_executor(executor)
                     res = await executor.async_run(
@@ -310,8 +310,8 @@ class CalculationMCPServer:
                     exec_id = res["job_id"]
                     job_id = "%s/%s" % (trace_id, exec_id)
                     results = res["result"]
-                    results, output_artifacts = handle_output_artifacts(
-                        results, exec_id, storage)
+                    results, output_artifacts = await handle_output_artifacts(
+                            results, exec_id, storage)
                     logger.info("Job %s result is %s" % (job_id, results))
                     await context.log(level="info", message="Job %s result is"
                                       " %s" % (job_id, results))
@@ -327,7 +327,7 @@ class CalculationMCPServer:
             self.add_patched_tool(fn, run_job, fn.__name__, is_async=True)
             self.add_patched_tool(
                 fn, submit_job, "submit_" + fn.__name__, doc="Submit a job",
-                override_return_annotation=True)
+                override_return_annotation=True, is_async=True)
             self.add_tool(query_job_status)
             self.add_tool(terminate_job)
             self.add_tool(get_job_results)

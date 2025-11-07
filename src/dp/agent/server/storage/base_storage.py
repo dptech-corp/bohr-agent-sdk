@@ -1,6 +1,8 @@
+import asyncio
 import os
 import tarfile
 from abc import ABC, abstractmethod
+from concurrent.futures import ProcessPoolExecutor
 from typing import List
 
 
@@ -61,6 +63,51 @@ class BaseStorage(ABC):
             os.chdir(cwd)
             key = os.path.join(key, fname + ".tgz")
             key = self._upload(key, "%s.tgz" % path)
+            os.remove("%s.tgz" % path)
+        return key
+
+    async def _async_upload(self, key, path):
+        loop = asyncio.get_event_loop()
+        with ProcessPoolExecutor(1) as pool:
+            key = await loop.run_in_executor(pool, self._upload, key, path)
+        return key
+
+    async def _async_download(self, key, path):
+        loop = asyncio.get_event_loop()
+        with ProcessPoolExecutor(1) as pool:
+            path = await loop.run_in_executor(pool, self._download, key, path)
+        return path
+
+    async def async_download(self, key: str, path: str) -> str:
+        objs = self.list(prefix=key, recursive=True)
+        if objs == [key]:
+            path = os.path.join(path, os.path.basename(key.split("?")[0]))
+            await self._async_download(key=key, path=path)
+            if path[-4:] == ".tgz":
+                path = extract(path)
+        else:
+            for obj in objs:
+                rel_path = obj[len(key):]
+                if rel_path[:1] == "/":
+                    rel_path = rel_path[1:]
+                file_path = os.path.join(path, rel_path)
+                await self._async_download(key=obj, path=file_path)
+        return path
+
+    async def async_upload(self, key: str, path: str) -> str:
+        if os.path.isfile(path):
+            key = os.path.join(key, os.path.basename(path))
+            key = await self._async_upload(key, path)
+        elif os.path.isdir(path):
+            cwd = os.getcwd()
+            if os.path.dirname(path):
+                os.chdir(os.path.dirname(path))
+            fname = os.path.basename(path)
+            with tarfile.open(fname + ".tgz", "w:gz", dereference=True) as tf:
+                tf.add(fname)
+            os.chdir(cwd)
+            key = os.path.join(key, fname + ".tgz")
+            key = await self._async_upload(key, "%s.tgz" % path)
             os.remove("%s.tgz" % path)
         return key
 
