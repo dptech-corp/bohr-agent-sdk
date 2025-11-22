@@ -130,13 +130,15 @@ def handle_input_artifacts(fn, kwargs, storage):
                 kwargs.get(name) is not None):
             uris = kwargs[name]
             new_paths = []
-            for uri in uris:
+            for i, uri in enumerate(uris):
                 scheme, key = parse_uri(uri)
                 if scheme == storage_type:
                     s = storage
                 else:
                     s = storage_dict[scheme]()
-                path = s.download(key, "inputs/%s" % name)
+                dest_dir = Path("inputs") / name / f"item_{i:03d}"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                path = s.download(key, str(dest_dir))
                 new_paths.append(Path(path))
                 logger.info("Artifact %s downloaded to %s" % (
                     uri, path))
@@ -172,13 +174,15 @@ def handle_input_artifacts(fn, kwargs, storage):
             new_paths_dict = {}
             for key_name, uris in uris_dict.items():
                 new_paths = []
-                for uri in uris:
+                for i, uri in enumerate(uris):
                     scheme, key = parse_uri(uri)
                     if scheme == storage_type:
                         s = storage
                     else:
                         s = storage_dict[scheme]()
-                    path = s.download(key, f"inputs/{name}/{key_name}")
+                    dest_dir = Path("inputs") / name / key_name / f"item_{i:03d}"
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    path = s.download(key, str(dest_dir))
                     new_paths.append(Path(path))
                     logger.info("Artifact %s (key=%s) downloaded to %s" % (
                         uri, key_name, path))
