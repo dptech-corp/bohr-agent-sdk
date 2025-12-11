@@ -48,11 +48,13 @@ if __name__ == "__main__":
     
     # uvicorn 始终监听 0.0.0.0 以支持所有配置的主机
     uvicorn.run(
-        app, 
-        host="0.0.0.0", 
+        app,
+        host="0.0.0.0",
         port=port,
         log_level="info",  # 使用 info 级别，过滤掉 warning
         access_log=False,  # 禁用访问日志，减少噪音
+        ws_ping_interval=20,  # Send WebSocket ping every 20s to keep connection alive
+        ws_ping_timeout=30,   # Disconnect if no pong received within 30s
         # 添加自定义的日志配置
         log_config={
             "version": 1,
