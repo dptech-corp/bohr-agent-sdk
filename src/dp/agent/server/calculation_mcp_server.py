@@ -59,6 +59,7 @@ def init_executor(executor_config: Optional[dict] = None):
 @contextmanager
 def set_directory(workdir: str):
     cwd = os.getcwd()
+    workdir = os.path.join(CALCULATION_MCP_WORKDIR, workdir)
     os.makedirs(workdir, exist_ok=True)
     try:
         os.chdir(workdir)
@@ -82,8 +83,7 @@ def query_job_status(job_id: str, executor: Optional[dict] = None
         status (str): One of "Running", "Succeeded" or "Failed"
     """
     trace_id, exec_id = job_id.split("/")
-    workdir = os.path.join(CALCULATION_MCP_WORKDIR, trace_id)
-    with set_directory(workdir):
+    with set_directory(trace_id):
         executor = load_job_info()["executor"] or executor
         _, executor = init_executor(executor)
         status = executor.query_status(exec_id)
@@ -98,8 +98,7 @@ def terminate_job(job_id: str, executor: Optional[dict] = None):
         job_id (str): The ID of the calculation job
     """
     trace_id, exec_id = job_id.split("/")
-    workdir = os.path.join(CALCULATION_MCP_WORKDIR, trace_id)
-    with set_directory(workdir):
+    with set_directory(trace_id):
         executor = load_job_info()["executor"] or executor
         _, executor = init_executor(executor)
         executor.terminate(exec_id)
@@ -244,8 +243,7 @@ def get_job_results(job_id: str, executor: Optional[dict] = None,
         results (Any): results of the calculation job
     """
     trace_id, exec_id = job_id.split("/")
-    workdir = os.path.join(CALCULATION_MCP_WORKDIR, trace_id)
-    with set_directory(workdir):
+    with set_directory(trace_id):
         job_info = load_job_info()
         executor = job_info["executor"] or executor
         storage = job_info["storage"] or storage
@@ -394,7 +392,7 @@ class CalculationMCPServer:
                 if create_workdir is False:
                     workdir = "."
                 else:
-                    workdir = os.path.join(CALCULATION_MCP_WORKDIR, trace_id)
+                    workdir = trace_id
                 with set_directory(workdir):
                     if preprocess_func is not None:
                         executor, storage, kwargs = preprocess_func(
@@ -439,7 +437,7 @@ class CalculationMCPServer:
                         and executor_type == "local"):
                     workdir = "."
                 else:
-                    workdir = os.path.join(CALCULATION_MCP_WORKDIR, trace_id)
+                    workdir = trace_id
                 with set_directory(workdir):
                     kwargs, input_artifacts = handle_input_artifacts(
                         fn, kwargs, storage)
