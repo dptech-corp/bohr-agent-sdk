@@ -470,7 +470,12 @@ class CalculationMCPServer:
             return fn
         return decorator
 
-    def run(self, **kwargs):
+    @property
+    def app(self):
+        self.mcp.settings.stateless_http = True
+        return self.mcp.streamable_http_app()
+
+    def run(self, host=None, port=None, **kwargs):
         if os.environ.get("DP_AGENT_RUNNING_MODE") in ["1", "true"]:
             return
 
@@ -486,4 +491,8 @@ class CalculationMCPServer:
                 include_in_schema=True,
             )
         )
+        if host is not None:
+            self.mcp.settings.host = host
+        if port is not None:
+            self.mcp.settings.port = port
         self.mcp.run(**kwargs)
