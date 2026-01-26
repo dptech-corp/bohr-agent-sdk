@@ -29,12 +29,31 @@ logger = get_logger(__name__)
 
 
 def parse_uri(uri):
-    scheme = urlparse(uri).scheme
+    """
+    Robust URI parsing that handles both standard URLs and Path-normalized URLs.
+    """
+    parsed = urlparse(uri)
+    scheme = parsed.scheme
+    
     if scheme == "":
         key = uri
         scheme = "local"
     else:
-        key = uri[len(scheme)+3:]
+        # Case 1: Standard URL (https://...)
+        prefix_double = scheme + "://"
+        # Case 2: (https:/...)
+        prefix_single = scheme + ":/"
+        
+        if uri.startswith(prefix_double):
+            key = uri[len(prefix_double):]
+        elif uri.startswith(prefix_single):
+            key = uri[len(prefix_single):]
+        else:
+            if uri.startswith(scheme + ":"):
+                 key = uri[len(scheme)+1:]
+            else:
+                 key = uri
+
     return scheme, key
 
 
