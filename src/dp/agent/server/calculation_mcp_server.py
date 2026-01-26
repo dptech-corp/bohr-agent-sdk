@@ -136,13 +136,16 @@ def traverse_and_process(value, annotation, storage_type, default_storage, input
             origin = get_origin(annotation)
             args = get_args(annotation)
     if annotation is Path:
-        if isinstance(value, str):
-            local_path = _download_artifact(value, default_storage, storage_type, input_artifacts, input_name, path_trace)
+        str_val = str(value)
+        parsed = urlparse(str_val)
+            
+        if parsed.scheme and len(parsed.scheme) > 1:
+            local_path = _download_artifact(str_val, default_storage, storage_type, input_artifacts, input_name, path_trace)
             return Path(local_path)
-        elif isinstance(value, Path):
-            return value
         else:
-            return value
+            return Path(value)
+                
+        
     # Fix 2: Use enumerate to pass unique index in path_trace
     if origin in (list, List, tuple, Tuple) and isinstance(value, (list, tuple)):
         inner_type = args[0] if args else Any
@@ -190,6 +193,7 @@ def traverse_and_process(value, annotation, storage_type, default_storage, input
     return value
 
 def handle_input_artifacts(fn, kwargs, storage):
+    logger.info(f"DEBUG: Server received kwargs: {kwargs}")
     storage_type, default_storage = init_storage(storage)
     sig = inspect.signature(fn)
     input_artifacts = {}
