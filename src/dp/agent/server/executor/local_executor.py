@@ -32,13 +32,13 @@ class Tee(io.TextIOBase):
         return len(text)
 
 
-def wrapped_fn(fn, kwargs, redirect_file=None):
+def wrapped_fn(fn, kwargs, redirect_log=False):
     pid = os.getpid()
     # explicitly reload dflow config
     reload_dflow_config()
-    if redirect_file:
+    if redirect_log:
         stdout = sys.stdout
-        flog = open(redirect_file, "w")
+        flog = open("%s.log" % pid, "w")
         sys.stdout = Tee(flog, stdout)
     try:
         if inspect.iscoroutinefunction(fn):
@@ -46,11 +46,11 @@ def wrapped_fn(fn, kwargs, redirect_file=None):
         else:
             result = fn(**kwargs)
     except Exception as e:
-        with open("err", "w") as f:
+        with open("%s.err" % pid, "w") as f:
             f.write(str(e))
         raise e
     finally:
-        if redirect_file:
+        if redirect_log:
             sys.stdout = stdout
             flog.close()
     with open("%s.txt" % pid, "w") as f:
@@ -111,15 +111,15 @@ class LocalExecutor(BaseExecutor):
         old_env = self.set_env()
         params = {"fn": fn, "kwargs": kwargs}
         if self.dflow:
-            params["redirect_file"] = "log.txt"
+            params["redirect_log"] = True
         p = Process(target=wrapped_fn, kwargs=params)
         p.start()
         extra_info = {}
         if self.dflow:
             while True:
                 alive = p.is_alive()
-                if os.path.isfile("log.txt"):
-                    with open("log.txt", "r") as f:
+                if os.path.isfile("%s.log" % p.pid):
+                    with open("%s.log" % p.pid, "r") as f:
                         log = f.read()
                     match_id = re.search(DFLOW_ID_PATTERN, log)
                     match_link = re.search(DFLOW_LINK_PATTERN, log)
@@ -133,8 +133,8 @@ class LocalExecutor(BaseExecutor):
                         extra_info["workflow_link"] = wf_link
                         break
                 if not alive:
-                    if os.path.isfile("err"):
-                        with open("err", "r") as f:
+                    if os.path.isfile("%s.err" % p.pid):
+                        with open("%s.err" % p.pid, "r") as f:
                             err_msg = f.read()
                     else:
                         err_msg = "No workflow submitted"
@@ -175,8 +175,8 @@ class LocalExecutor(BaseExecutor):
         if os.path.isfile("%s.txt" % job_id):
             with open("%s.txt" % job_id, "r") as f:
                 return jsonpickle.loads(f.read())
-        elif os.path.isfile("err"):
-            with open("err", "r") as f:
+        elif os.path.isfile("%s.err" % job_id):
+            with open("%s.err" % job_id, "r") as f:
                 err_msg = f.read()
             raise RuntimeError(err_msg)
         return {}

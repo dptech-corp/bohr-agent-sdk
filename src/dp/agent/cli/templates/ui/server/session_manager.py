@@ -632,7 +632,7 @@ class SessionManager:
     ):
         """Process message stream - using ADK native event handling"""
         streaming_text = ""  # Accumulate streaming text
-        
+
         # Run Runner
         async for event in runner.run_async(
             new_message=content,

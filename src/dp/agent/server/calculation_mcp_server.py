@@ -26,6 +26,7 @@ from .executor import executor_dict
 from .storage import storage_dict
 from .utils import get_logger, JobResult, Tool
 logger = get_logger(__name__)
+CALCULATION_MCP_WORKDIR = os.getenv("CALCULATION_MCP_WORKDIR", os.getcwd())
 
 
 def parse_uri(uri):
@@ -77,6 +78,7 @@ def init_executor(executor_config: Optional[dict] = None):
 @contextmanager
 def set_directory(workdir: str):
     cwd = os.getcwd()
+    workdir = os.path.join(CALCULATION_MCP_WORKDIR, workdir)
     os.makedirs(workdir, exist_ok=True)
     try:
         os.chdir(workdir)
@@ -218,16 +220,91 @@ def handle_input_artifacts(fn, kwargs, storage):
     input_artifacts = {}
     new_kwargs = {}
     for name, param in sig.parameters.items():
-        if name in kwargs:
-            new_kwargs[name] = traverse_and_process(
-                kwargs[name],
-                param.annotation,
-                storage_type,
-                default_storage,
-                input_artifacts,
-                name
-            )
-    return new_kwargs, input_artifacts
+        if param.annotation is Path or (
+            param.annotation is Optional[Path] and
+                kwargs.get(name) is not None):
+            uri = kwargs[name]
+            scheme, key = parse_uri(uri)
+            if scheme == storage_type:
+                s = storage
+            else:
+                s = storage_dict[scheme]()
+            path = s.download(key, "inputs/%s" % name)
+            logger.info("Artifact %s downloaded to %s" % (
+                uri, path))
+            kwargs[name] = Path(path)
+            input_artifacts[name] = {
+                "storage_type": scheme,
+                "uri": uri,
+            }
+        elif param.annotation is List[Path] or (
+            param.annotation is Optional[List[Path]] and
+                kwargs.get(name) is not None):
+            uris = kwargs[name]
+            new_paths = []
+            for i, uri in enumerate(uris):
+                scheme, key = parse_uri(uri)
+                if scheme == storage_type:
+                    s = storage
+                else:
+                    s = storage_dict[scheme]()
+                dest_dir = Path("inputs") / name / f"item_{i:03d}"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                path = s.download(key, str(dest_dir))
+                new_paths.append(Path(path))
+                logger.info("Artifact %s downloaded to %s" % (
+                    uri, path))
+            kwargs[name] = new_paths
+            input_artifacts[name] = {
+                "storage_type": storage_type,
+                "uri": uris,
+            }
+        elif param.annotation is Dict[str, Path] or (
+            param.annotation is Optional[Dict[str, Path]] and
+                kwargs.get(name) is not None):
+            uris_dict = kwargs[name]
+            new_paths_dict = {}
+            for key_name, uri in uris_dict.items():
+                scheme, key = parse_uri(uri)
+                if scheme == storage_type:
+                    s = storage
+                else:
+                    s = storage_dict[scheme]()
+                path = s.download(key, f"inputs/{name}/{key_name}")
+                new_paths_dict[key_name] = Path(path)
+                logger.info("Artifact %s (key=%s) downloaded to %s" % (
+                    uri, key_name, path))
+            kwargs[name] = new_paths_dict
+            input_artifacts[name] = {
+                "storage_type": storage_type,
+                "uri": uris_dict,
+            }
+        elif param.annotation is Dict[str, List[Path]] or (
+            param.annotation is Optional[Dict[str, List[Path]]] and
+                kwargs.get(name) is not None):
+            uris_dict = kwargs[name]
+            new_paths_dict = {}
+            for key_name, uris in uris_dict.items():
+                new_paths = []
+                for i, uri in enumerate(uris):
+                    scheme, key = parse_uri(uri)
+                    if scheme == storage_type:
+                        s = storage
+                    else:
+                        s = storage_dict[scheme]()
+                    dest_dir = Path("inputs") / name / key_name / f"item_{i:03d}"
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    path = s.download(key, str(dest_dir))
+                    new_paths.append(Path(path))
+                    logger.info("Artifact %s (key=%s) downloaded to %s" % (
+                        uri, key_name, path))
+                new_paths_dict[key_name] = new_paths
+            kwargs[name] = new_paths_dict
+            input_artifacts[name] = {
+                "storage_type": storage_type,
+                "uri": uris_dict,
+            }
+    return kwargs, input_artifacts
 
 
 def handle_output_artifacts(results, exec_id, storage):
@@ -410,7 +487,9 @@ class CalculationMCPServer:
         self.mcp._tool_manager._tools[tool.name] = tool
         return tool
 
-    def tool(self, preprocess_func=None):
+    def tool(self, preprocess_func=None, create_workdir=None):
+        # When create_workdir is None, do not create workdir when fn is async
+        # and running locally to avoid chdir conflicts, create otherwise
         if preprocess_func is None:
             preprocess_func = self.preprocess_func
 
@@ -420,7 +499,11 @@ class CalculationMCPServer:
                            **kwargs) -> SubmitResult:
                 trace_id = datetime.today().strftime('%Y-%m-%d-%H:%M:%S.%f')
                 logger.info("Job processing (Trace ID: %s)" % trace_id)
-                with set_directory(trace_id):
+                if create_workdir is False:
+                    workdir = "."
+                else:
+                    workdir = trace_id
+                with set_directory(workdir):
                     if preprocess_func is not None:
                         executor, storage, kwargs = preprocess_func(
                             executor, storage, kwargs)
@@ -436,7 +519,7 @@ class CalculationMCPServer:
                     executor_type, executor = init_executor(executor)
                     res = executor.submit(fn, kwargs)
                     exec_id = res["job_id"]
-                    job_id = "%s/%s" % (trace_id, exec_id)
+                    job_id = "%s/%s" % (workdir, exec_id)
                     logger.info("Job submitted (ID: %s)" % job_id)
                 result = SubmitResult(
                     job_id=job_id,
@@ -455,17 +538,23 @@ class CalculationMCPServer:
                 context = self.mcp.get_context()
                 trace_id = datetime.today().strftime('%Y-%m-%d-%H:%M:%S.%f')
                 logger.info("Job processing (Trace ID: %s)" % trace_id)
-                with set_directory(trace_id):
-                    if preprocess_func is not None:
-                        executor, storage, kwargs = preprocess_func(
-                            executor, storage, kwargs)
+                if preprocess_func is not None:
+                    executor, storage, kwargs = preprocess_func(
+                        executor, storage, kwargs)
+                executor_type, executor = init_executor(executor)
+                if create_workdir is False or (
+                    create_workdir is None and inspect.iscoroutinefunction(fn)
+                        and executor_type == "local"):
+                    workdir = "."
+                else:
+                    workdir = trace_id
+                with set_directory(workdir):
                     kwargs, input_artifacts = handle_input_artifacts(
                         fn, kwargs, storage)
-                    executor_type, executor = init_executor(executor)
                     res = await executor.async_run(
-                        fn, kwargs, context, trace_id)
+                        fn, kwargs, context, workdir)
                     exec_id = res["job_id"]
-                    job_id = "%s/%s" % (trace_id, exec_id)
+                    job_id = "%s/%s" % (workdir, exec_id)
                     results = res["result"]
                     results, output_artifacts = handle_output_artifacts(
                         results, exec_id, storage)
@@ -491,7 +580,12 @@ class CalculationMCPServer:
             return fn
         return decorator
 
-    def run(self, **kwargs):
+    @property
+    def app(self):
+        self.mcp.settings.stateless_http = True
+        return self.mcp.streamable_http_app()
+
+    def run(self, host=None, port=None, **kwargs):
         if os.environ.get("DP_AGENT_RUNNING_MODE") in ["1", "true"]:
             return
 
@@ -507,4 +601,8 @@ class CalculationMCPServer:
                 include_in_schema=True,
             )
         )
+        if host is not None:
+            self.mcp.settings.host = host
+        if port is not None:
+            self.mcp.settings.port = port
         self.mcp.run(**kwargs)

@@ -93,16 +93,19 @@ class CalculationMCPTool(MCPTool):
     async def run_async(self, args, tool_context: ToolContext, **kwargs):
         # TODO: add progress callback when run_async
         args = deepcopy(args)
-        if self.override or "executor" not in args:
+        if self.override:
             args["executor"] = self.executor
-        if self.override or "storage" not in args:
             args["storage"] = self.storage
+        if not args.get("executor"):
+            args.pop("executor", None)
+        if not args.get("storage"):
+            args.pop("storage", None)
         if not self.async_mode and self.wait:
             return await super().run_async(
                 args=args, tool_context=tool_context, **kwargs)
 
-        executor = args["executor"]
-        storage = args["storage"]
+        executor = args.get("executor")
+        storage = args.get("storage")
         res = await self.submit_tool.run_async(
             args=args, tool_context=tool_context, **kwargs)
         if isinstance(res, dict):

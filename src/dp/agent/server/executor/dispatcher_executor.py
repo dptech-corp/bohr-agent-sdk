@@ -3,6 +3,7 @@ import inspect
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -182,9 +183,17 @@ class DispatcherExecutor(BaseExecutor):
         for package in self.python_packages:
             target = os.path.basename(package)
             if os.path.abspath(package) != os.path.abspath(target):
-                if os.path.islink(target):
-                    os.remove(target)
-                os.symlink(package, target)
+                copy_method = os.getenv("DISPATCHER_EXECUTOR_COPY_METHOD",
+                                        "symlink")
+                if copy_method == "symlink":
+                    if os.path.islink(target):
+                        os.remove(target)
+                    os.symlink(package, target)
+                elif copy_method == "copy":
+                    if os.path.isfile(package):
+                        shutil.copy(package, target)
+                    elif os.path.isdir(package):
+                        shutil.copytree(package, target)
             if target not in forward_files:
                 forward_files.append(target)
         for value in kwargs.values():
