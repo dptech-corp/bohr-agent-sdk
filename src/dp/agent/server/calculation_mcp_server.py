@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Annotated, Literal, Optional, List, Dict
+from typing import Annotated, Literal, Optional, List, Dict, Union, get_origin, get_args
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.context_injection import (
@@ -105,9 +105,24 @@ def terminate_job(job_id: str, executor: Optional[dict] = None):
         logger.info("Job %s is terminated" % job_id)
 
 
+def _normalize_annotation(ann):
+    if ann is None:
+        return None
+    origin = get_origin(ann)
+    if origin is Annotated:
+        return _normalize_annotation(get_args(ann)[0])
+    if origin is Union:
+        args = get_args(ann)
+        if type(None) in args:
+            non_none = [a for a in args if a is not type(None)]
+            if non_none:
+                return _normalize_annotation(non_none[0])
+    return ann
+
+
 def handle_input_artifacts(fn, kwargs, storage):
     storage_type, storage = init_storage(storage)
-    sig = inspect.signature(fn)
+    sig = inspect.signature(fn, eval_str=True)
     input_artifacts = {}
     for name, param in sig.parameters.items():
         if param.annotation is Path or (
@@ -149,12 +164,14 @@ def handle_input_artifacts(fn, kwargs, storage):
                 "storage_type": storage_type,
                 "uri": uris,
             }
-        elif param.annotation is Dict[str, Path] or (
-            param.annotation is Optional[Dict[str, Path]] and
-                kwargs.get(name) is not None):
+        elif (_normalize_annotation(param.annotation) is Dict[str, Path] and
+              name in kwargs and kwargs.get(name) is not None):
             uris_dict = kwargs[name]
             new_paths_dict = {}
             for key_name, uri in uris_dict.items():
+                if not uri:
+                    new_paths_dict[key_name] = Path(".")
+                    continue
                 scheme, key = parse_uri(uri)
                 if scheme == storage_type:
                     s = storage
