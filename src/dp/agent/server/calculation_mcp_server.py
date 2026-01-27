@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Annotated, Literal, Optional, List, Dict, Any, Union, get_origin, get_args, Tuple
+from typing import Annotated, Literal, Optional, List, Dict, Union, get_origin, get_args
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.context_injection import (
@@ -30,31 +30,12 @@ CALCULATION_MCP_WORKDIR = os.getenv("CALCULATION_MCP_WORKDIR", os.getcwd())
 
 
 def parse_uri(uri):
-    """
-    Robust URI parsing that handles both standard URLs and Path-normalized URLs.
-    """
-    parsed = urlparse(uri)
-    scheme = parsed.scheme
-    
+    scheme = urlparse(uri).scheme
     if scheme == "":
         key = uri
         scheme = "local"
     else:
-        # Case 1: Standard URL (https://...)
-        prefix_double = scheme + "://"
-        # Case 2: (https:/...)
-        prefix_single = scheme + ":/"
-        
-        if uri.startswith(prefix_double):
-            key = uri[len(prefix_double):]
-        elif uri.startswith(prefix_single):
-            key = uri[len(prefix_single):]
-        else:
-            if uri.startswith(scheme + ":"):
-                 key = uri[len(scheme)+1:]
-            else:
-                 key = uri
-
+        key = uri[len(scheme)+3:]
     return scheme, key
 
 
@@ -124,101 +105,25 @@ def terminate_job(job_id: str, executor: Optional[dict] = None):
         logger.info("Job %s is terminated" % job_id)
 
 
-def _download_artifact(uri: str, default_storage, storage_type, input_artifacts, input_name, path_trace):
-    scheme, key = parse_uri(uri)
-    if scheme == storage_type:
-        s = default_storage
-    else:
-        s = storage_dict[scheme]()
-    filename = os.path.basename(key)
-    if path_trace:
-        rel_path = "/".join(str(p) for p in path_trace)
-        download_path = f"inputs/{input_name}/{rel_path}/{filename}"
-    else:
-        download_path = f"inputs/{input_name}/{filename}"
-    path = s.download(key, download_path)
-    logger.info("Artifact %s downloaded to %s" % (uri, path))
-    # Track artifact info as a list of URIs for each input
-    if input_name not in input_artifacts:
-        input_artifacts[input_name] = {"storage_type": scheme, "uri": []}
-    if isinstance(input_artifacts[input_name]["uri"], list):
-        input_artifacts[input_name]["uri"].append(uri)
-    return path
+def _normalize_annotation(ann):
+    if ann is None:
+        return None
+    origin = get_origin(ann)
+    if origin is Annotated:
+        return _normalize_annotation(get_args(ann)[0])
+    if origin is Union:
+        args = get_args(ann)
+        if type(None) in args:
+            non_none = [a for a in args if a is not type(None)]
+            if non_none:
+                return _normalize_annotation(non_none[0])
+    return ann
 
-def traverse_and_process(value, annotation, storage_type, default_storage, input_artifacts, input_name, path_trace=None):
-    if path_trace is None:
-        path_trace = []
-    origin = get_origin(annotation)
-    args = get_args(annotation)
-    if origin is Union and type(None) in args:
-        non_none_args = [arg for arg in args if arg is not type(None)]
-        if non_none_args:
-            annotation = non_none_args[0]
-            origin = get_origin(annotation)
-            args = get_args(annotation)
-    if annotation is Path:
-        str_val = str(value)
-        parsed = urlparse(str_val)
-            
-        if parsed.scheme and len(parsed.scheme) > 1:
-            local_path = _download_artifact(str_val, default_storage, storage_type, input_artifacts, input_name, path_trace)
-            return Path(local_path)
-        else:
-            return Path(value)
-                
-        
-    # Fix 2: Use enumerate to pass unique index in path_trace
-    if origin in (list, List, tuple, Tuple) and isinstance(value, (list, tuple)):
-        inner_type = args[0] if args else Any
-        return [
-            traverse_and_process(
-                item,
-                inner_type,
-                storage_type,
-                default_storage,
-                input_artifacts,
-                input_name,
-                path_trace + [i]
-            )
-            for i, item in enumerate(value)
-        ]
-    if origin in (dict, Dict) and isinstance(value, dict):
-        value_type = args[1] if (args and len(args) > 1) else Any
-        return {
-            k: traverse_and_process(
-                v,
-                value_type,
-                storage_type,
-                default_storage,
-                input_artifacts,
-                input_name,
-                path_trace + [k]
-            )
-            for k, v in value.items()
-        }
-    if isinstance(value, BaseModel):
-        for field_name, field_info in value.model_fields.items():
-            field_value = getattr(value, field_name)
-            if field_value is not None:
-                new_value = traverse_and_process(
-                    field_value,
-                    field_info.annotation,
-                    storage_type,
-                    default_storage,
-                    input_artifacts,
-                    input_name,
-                    path_trace + [field_name]
-                )
-                setattr(value, field_name, new_value)
-        return value
-    return value
 
 def handle_input_artifacts(fn, kwargs, storage):
-    logger.info(f"DEBUG: Server received kwargs: {kwargs}")
-    storage_type, default_storage = init_storage(storage)
-    sig = inspect.signature(fn)
+    storage_type, storage = init_storage(storage)
+    sig = inspect.signature(fn, eval_str=True)
     input_artifacts = {}
-    new_kwargs = {}
     for name, param in sig.parameters.items():
         if param.annotation is Path or (
             param.annotation is Optional[Path] and
@@ -259,12 +164,14 @@ def handle_input_artifacts(fn, kwargs, storage):
                 "storage_type": storage_type,
                 "uri": uris,
             }
-        elif param.annotation is Dict[str, Path] or (
-            param.annotation is Optional[Dict[str, Path]] and
-                kwargs.get(name) is not None):
+        elif (_normalize_annotation(param.annotation) is Dict[str, Path] and
+              name in kwargs and kwargs.get(name) is not None):
             uris_dict = kwargs[name]
             new_paths_dict = {}
             for key_name, uri in uris_dict.items():
+                if not uri:
+                    new_paths_dict[key_name] = Path(".")
+                    continue
                 scheme, key = parse_uri(uri)
                 if scheme == storage_type:
                     s = storage
