@@ -30,12 +30,18 @@ CALCULATION_MCP_WORKDIR = os.getenv("CALCULATION_MCP_WORKDIR", os.getcwd())
 
 
 def parse_uri(uri):
-    scheme = urlparse(uri).scheme
+    parsed = urlparse(uri)
+    scheme = parsed.scheme
     if scheme == "":
         key = uri
         scheme = "local"
     else:
-        key = uri[len(scheme)+3:]
+        if parsed.netloc:
+            key = parsed.netloc + parsed.path
+        else:
+            key = parsed.path.lstrip("/")
+        if parsed.query:
+            key += "?" + parsed.query
     return scheme, key
 
 
