@@ -39,7 +39,7 @@ def parse_uri(uri):
         if parsed.netloc:
             key = parsed.netloc + parsed.path
         else:
-            key = parsed.path.lstrip("/")
+            key = parsed.path
         if parsed.query:
             key += "?" + parsed.query
     return scheme, key
