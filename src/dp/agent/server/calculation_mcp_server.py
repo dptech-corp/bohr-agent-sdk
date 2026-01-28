@@ -307,6 +307,57 @@ annotation_map = {
 }
 
 
+# Cache for schema models derived from BaseModel (Path -> str in JSON schema)
+_schema_model_cache: Dict[type, type] = {}
+
+def get_schema_annotation(annotation: Any) -> Any:
+    """
+    Map an annotation to the type used in JSON schema (e.g. Path -> str).
+    For BaseModel, build a schema model with the same structure but Path fields as str.
+    Handles List[...], Dict[...], Optional[...] and nested BaseModel recursively.
+    """
+    if annotation is None or annotation is type(None):
+        return annotation
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return get_schema_annotation(get_args(annotation)[0])
+    if origin is Union:
+        args = get_args(annotation)
+        if type(None) in args:
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) == 1:
+                return Optional[get_schema_annotation(non_none[0])]
+    if annotation in annotation_map:
+        return annotation_map[annotation]
+    # List[X] -> List[schema(X)] so e.g. List[BaseModel] becomes List[BaseModelSchema]
+    if origin in (list, List):
+        type_args = get_args(annotation)
+        inner = get_schema_annotation(type_args[0]) if type_args else Any
+        return List[inner]
+    # Dict[K, V] -> Dict[K, schema(V)]
+    if origin in (dict, Dict):
+        type_args = get_args(annotation)
+        if type_args and len(type_args) >= 2:
+            return Dict[type_args[0], get_schema_annotation(type_args[1])]
+        return annotation
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        if annotation not in _schema_model_cache:
+            schema_fields = {}
+            for name, field_info in annotation.model_fields.items():
+                fa = get_schema_annotation(field_info.annotation)
+                if field_info.is_required():
+                    schema_fields[name] = (fa, Field())
+                else:
+                    default = getattr(field_info, "default", None)
+                    schema_fields[name] = (fa, Field(default=default))
+            _schema_model_cache[annotation] = create_model(
+                f"{annotation.__name__}Schema",
+                **schema_fields,
+            )
+        return _schema_model_cache[annotation]
+    return annotation
+
+
 class SubmitResult(BaseModel):
     job_id: str
     extra_info: dict | None = None
@@ -367,11 +418,8 @@ class CalculationMCPServer:
         for n, annotation in \
                 func_arg_metadata.arg_model.__annotations__.items():
             param = params[n]
-            if param.annotation in annotation_map:
-                model_params[n] = Annotated[
-                    (annotation_map[param.annotation], Field())]
-            else:
-                model_params[n] = annotation
+            schema_ann = get_schema_annotation(param.annotation)
+            model_params[n] = Annotated[(schema_ann, Field())]
             if param.default is not inspect.Parameter.empty:
                 model_params[n] = (model_params[n], param.default)
         for n, param in inspect.signature(new_fn).parameters.items():
