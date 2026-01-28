@@ -200,6 +200,9 @@ class DispatcherExecutor(BaseExecutor):
             if isinstance(value, Path):
                 forward_files.append(str(value))
 
+        if os.path.isdir("inputs") and "inputs" not in forward_files:
+            forward_files.append("inputs")
+
         task = {
             "task_work_path": "./",
             "outlog": "log",
