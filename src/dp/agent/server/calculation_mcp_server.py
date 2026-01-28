@@ -155,6 +155,7 @@ def _traverse_and_process(value, annotation, storage_type, storage,
     origin = get_origin(ann)
     args = get_args(ann)
 
+    # Path: only when resolved annotation is Path (Optional[Path] is normalized to Path)
     if ann is Path:
         s = str(value)
         if not s:
@@ -165,40 +166,9 @@ def _traverse_and_process(value, annotation, storage_type, storage,
                 s, storage, storage_type, input_artifacts, input_name, path_trace))
         return Path(value)
 
-    if origin in (list, List) and isinstance(value, (list, tuple)):
-        inner = _normalize_annotation(args[0]) if args else Any
-        return [
-            _traverse_and_process(
-                item,
-                Dict[str, Any] if (inner is Any and isinstance(item, dict)) else inner,
-                storage_type, storage,
-                input_artifacts, input_name, path_trace + [i])
-            for i, item in enumerate(value)
-        ]
-
-    if origin in (dict, Dict) and isinstance(value, dict):
-        value_type = _normalize_annotation(args[1]) if (args and len(args) > 1) else Any
-        path_like_keys = frozenset({"model_path", "template_path", "path", "file_path", "file"})
-
-        def item_type(k, v):
-            if value_type is not Any:
-                return value_type
-            if k in path_like_keys and isinstance(v, str):
-                return Path
-            if isinstance(v, list):
-                return List[Dict[str, Any]]
-            if isinstance(v, dict):
-                return Dict[str, Any]
-            return Any
-
-        return {
-            k: _traverse_and_process(
-                v, item_type(k, v), storage_type, storage,
-                input_artifacts, input_name, path_trace + [k])
-            for k, v in value.items()
-        }
-
+    # BaseModel: schema-driven traversal over model fields (check before dict so nesting works)
     if isinstance(ann, type) and issubclass(ann, BaseModel):
+        # Convert to dict for traversal; re-instantiate to model at the end so callers get objects
         if isinstance(value, BaseModel):
             value = value.model_dump()
         if not isinstance(value, dict):
@@ -207,9 +177,40 @@ def _traverse_and_process(value, annotation, storage_type, storage,
         for field_name, field_info in ann.model_fields.items():
             if field_name in out and out[field_name] is not None:
                 out[field_name] = _traverse_and_process(
-                    out[field_name], field_info.annotation, storage_type, storage,
-                    input_artifacts, input_name, path_trace + [field_name])
-        return out
+                    out[field_name],
+                    field_info.annotation,
+                    storage_type,
+                    storage,
+                    input_artifacts,
+                    input_name,
+                    path_trace + [field_name],
+                )
+        # Re-instantiate so tool functions receive model instances (dot notation works)
+        try:
+            return ann.model_validate(out)
+        except Exception as e:
+            logger.warning("Failed to re-instantiate model %s: %s", ann.__name__, e)
+            return out
+
+    # List: use inner type from type args
+    if origin in (list, List) and isinstance(value, (list, tuple)):
+        inner = _normalize_annotation(args[0]) if args else Any
+        return [
+            _traverse_and_process(
+                item, inner, storage_type, storage,
+                input_artifacts, input_name, path_trace + [i])
+            for i, item in enumerate(value)
+        ]
+
+    # Dict: use value type from type args (e.g. Dict[str, Path] processes values as Path)
+    if origin in (dict, Dict) and isinstance(value, dict):
+        value_type = _normalize_annotation(args[1]) if (args and len(args) > 1) else Any
+        return {
+            k: _traverse_and_process(
+                v, value_type, storage_type, storage,
+                input_artifacts, input_name, path_trace + [k])
+            for k, v in value.items()
+        }
 
     return value
 
