@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="bohr-agent-sdk",
-    version="0.1.122",
+    version="0.1.123",
     description="SDK for science agent and mcp tools",
     long_description=long_description,
     long_description_content_type="text/markdown",
