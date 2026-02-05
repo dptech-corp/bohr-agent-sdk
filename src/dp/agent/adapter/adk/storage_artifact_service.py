@@ -80,6 +80,7 @@ class StorageArtifactService(BaseArtifactService):
             path = os.path.join(tmpdir, filename)
             with open(path, "wb") as f:
                 f.write(artifact.inline_data.data)
+            self.storage._check_upload_limit(path)
             self.storage._upload(key, path)
 
         return version
@@ -108,6 +109,7 @@ class StorageArtifactService(BaseArtifactService):
         key = self._get_key(
             app_name, user_id, session_id, filename, version
         )
+        self.storage._check_download_limit(key)
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, filename)
             self.storage._download(key, path)

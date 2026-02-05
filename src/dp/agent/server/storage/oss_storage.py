@@ -14,6 +14,9 @@ class OSSStorage(BaseStorage):
             access_key_id: Optional[str] = None,
             access_key_secret: Optional[str] = None,
             prefix: Optional[str] = None,
+            max_upload_size: Optional[int] = None,
+            max_download_size: Optional[int] = None,
+            **kwargs,
     ) -> None:
         """OSS storage interface
 
@@ -23,7 +26,10 @@ class OSSStorage(BaseStorage):
             access_key_id: The OSS access key
             access_key_secret: The OSS secret key
             prefix: Artifact storage prefix in the OSS bucket
+            max_upload_size: Max upload size in bytes; None = no limit
+            max_download_size: Max download size in bytes; None = no limit
         """
+        super().__init__(max_upload_size=max_upload_size, max_download_size=max_download_size)
         if endpoint is None:
             endpoint = os.environ.get("OSS_ENDPOINT")
         if bucket_name is None:
@@ -47,6 +53,15 @@ class OSSStorage(BaseStorage):
         if not key.startswith(self.prefix):
             return self.prefix + key
         return key
+
+    def get_size(self, key: str) -> Optional[int]:
+        key = self.prefixing(key)
+        try:
+            meta = self.bucket.get_object_meta(key)
+            return getattr(meta, "content_length", None)
+        except Exception:
+            # Object not found (404/NoSuchKey) or other OSS error: treat as unknown size, skip limit check
+            return None
 
     def _upload(self, key, path):
         key = self.prefixing(key)

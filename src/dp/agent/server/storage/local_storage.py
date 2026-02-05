@@ -1,13 +1,24 @@
 import hashlib
 import os
 import shutil
+from typing import Optional
 
 from .base_storage import BaseStorage
 
 
 class LocalStorage(BaseStorage):
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        max_upload_size: Optional[int] = None,
+        max_download_size: Optional[int] = None,
+        **kwargs,
+    ):
+        super().__init__(max_upload_size=max_upload_size, max_download_size=max_download_size)
+
+    def get_size(self, key: str) -> Optional[int]:
+        if os.path.isfile(key):
+            return os.path.getsize(key)
+        return None
 
     def _upload(self, key, path):
         os.makedirs(os.path.dirname(key), exist_ok=True)

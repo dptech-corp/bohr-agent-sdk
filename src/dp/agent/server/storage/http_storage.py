@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import Optional
 
 import requests
 
@@ -13,7 +14,14 @@ config = {
 class HTTPStorage(BaseStorage):
     scheme = "http"
 
-    def __init__(self, plugin: dict = None):
+    def __init__(
+        self,
+        plugin: dict = None,
+        max_upload_size: Optional[int] = None,
+        max_download_size: Optional[int] = None,
+        **kwargs,
+    ):
+        super().__init__(max_upload_size=max_upload_size, max_download_size=max_download_size)
         self.plugin = None
         if plugin is None and config["plugin_type"] is not None:
             plugin = {"type": config["plugin_type"]}
@@ -21,6 +29,16 @@ class HTTPStorage(BaseStorage):
             from . import storage_dict
             storage_type = plugin.pop("type")
             self.plugin = storage_dict[storage_type](**plugin)
+
+    def get_size(self, key: str) -> Optional[int]:
+        url = self.scheme + "://" + key
+        try:
+            r = requests.head(url, verify=False, timeout=10)
+            if r.ok and "Content-Length" in r.headers:
+                return int(r.headers["Content-Length"])
+        except requests.RequestException:
+            pass
+        return None
 
     def _upload(self, key, path):
         if self.plugin is not None:

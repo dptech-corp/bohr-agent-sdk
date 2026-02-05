@@ -86,6 +86,9 @@ class BohriumStorage(BaseStorage):
             access_key: Optional[str] = None,
             openapi_url: Optional[str] = None,
             app_key: Optional[str] = None,
+            max_upload_size: Optional[int] = None,
+            max_download_size: Optional[int] = None,
+            **kwargs,
     ) -> None:
         """Bohrium storage interface
 
@@ -99,7 +102,10 @@ class BohriumStorage(BaseStorage):
             prefix: Artifact storage prefix in user's personal storage or
                 project storage
             ticket: The ticket of bohrium
+            max_upload_size: Max upload size in bytes; None = no limit
+            max_download_size: Max download size in bytes; None = no limit
         """
+        super().__init__(max_upload_size=max_upload_size, max_download_size=max_download_size)
         self.bohrium_url = bohrium_url if bohrium_url is not None else \
             config["bohrium_url"]
         self.username = username if username is not None else \
@@ -254,6 +260,21 @@ class BohriumStorage(BaseStorage):
             else:
                 raise e
         return meta["entityTag"] if "entityTag" in meta else ""
+
+    def get_size(self, key: str) -> Optional[int]:
+        key = self.prefixing(key)
+        client = tiefblue.Client(base_url=self.tiefblue_url, token=self.token)
+        try:
+            meta = client.meta(key)
+        except tiefblue.client.TiefblueException as e:
+            if e.code == 190001:
+                self.get_token()
+                client = tiefblue.Client(base_url=self.tiefblue_url,
+                                         token=self.token)
+                meta = client.meta(key)
+            else:
+                raise e
+        return meta.get("size") or meta.get("contentLength")
 
     def get_http_url(self, key):
         key = self.prefixing(key)

@@ -46,6 +46,7 @@ def parse_uri(uri):
 
 
 def init_storage(storage_config: Optional[dict] = None):
+    """Create storage from config. Optional: max_upload_size, max_download_size (bytes, default no limit)."""
     if not storage_config:
         storage_config = {"type": "local"}
     storage_config = deepcopy(storage_config)
