@@ -32,20 +32,23 @@ class BaseExecutor(ABC):
     def prune_context(self, kwargs: dict):
         for key, value in kwargs.items():
             if isinstance(value, Context):
-                context = Context(request_context=RequestContext(
-                    request_id=value.request_context.request_id,
-                    meta=value.request_context.meta,
-                    session=None,
-                    lifespan_context=value.request_context.lifespan_context,
-                    request=Request(
-                        scope={
-                            k: v for k, v in
-                            value.request_context.request.scope.items()
-                            if k not in ["app", "router", "endpoint",
-                                         "starlette.exception_handlers"]
-                        },
-                    )
-                ))
+                try:
+                    context = Context(request_context=RequestContext(
+                        request_id=value.request_context.request_id,
+                        meta=value.request_context.meta,
+                        session=None,
+                        lifespan_context=value.request_context.lifespan_context,
+                        request=Request(
+                            scope={
+                                k: v for k, v in
+                                value.request_context.request.scope.items()
+                                if k not in ["app", "router", "endpoint",
+                                             "starlette.exception_handlers"]
+                            },
+                        )
+                    ))
+                except Exception:
+                    context = Context()
                 kwargs[key] = context
         return kwargs
 
