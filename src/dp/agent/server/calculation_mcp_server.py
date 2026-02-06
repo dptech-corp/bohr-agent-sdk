@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Annotated, Literal, Optional, List, Dict, Union, Any, get_origin, get_args
+from typing import Annotated, Literal, Optional, List, Dict
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.context_injection import (
@@ -111,128 +111,96 @@ def terminate_job(job_id: str, executor: Optional[dict] = None):
         logger.info("Job %s is terminated" % job_id)
 
 
-def _normalize_annotation(ann):
-    if ann is None:
-        return None
-    origin = get_origin(ann)
-    if origin is Annotated:
-        return _normalize_annotation(get_args(ann)[0])
-    if origin is Union:
-        args = get_args(ann)
-        if type(None) in args:
-            non_none = [a for a in args if a is not type(None)]
-            if non_none:
-                return _normalize_annotation(non_none[0])
-    return ann
-
-
-def _download_artifact(uri, storage, storage_type, input_artifacts,
-                       input_name, path_trace):
-    scheme, key = parse_uri(uri)
-    if scheme == storage_type:
-        s = storage
-    else:
-        s = storage_dict[scheme]()
-    rel = "/".join(str(p) for p in path_trace) if path_trace else ""
-    download_dir = os.path.join("inputs", input_name, rel) if rel else os.path.join("inputs", input_name)
-    os.makedirs(download_dir, exist_ok=True)
-    path = s.download(key, download_dir)
-    logger.info("Artifact %s downloaded to %s" % (uri, path))
-    if input_name not in input_artifacts:
-        input_artifacts[input_name] = {"storage_type": scheme, "uri": []}
-    if isinstance(input_artifacts[input_name].get("uri"), list):
-        input_artifacts[input_name]["uri"].append(uri)
-    return path
-
-
-def _traverse_and_process(value, annotation, storage_type, storage,
-                          input_artifacts, input_name, path_trace=None):
-    if path_trace is None:
-        path_trace = []
-    ann = _normalize_annotation(annotation)
-    if ann is None:
-        return value
-    origin = get_origin(ann)
-    args = get_args(ann)
-
-    # Path: only when resolved annotation is Path (Optional[Path] is normalized to Path)
-    if ann is Path:
-        s = str(value)
-        if not s:
-            return Path(".")
-        parsed = urlparse(s)
-        if parsed.scheme and len(parsed.scheme) > 1:
-            return Path(_download_artifact(
-                s, storage, storage_type, input_artifacts, input_name, path_trace))
-        return Path(value)
-
-    # BaseModel: schema-driven traversal over model fields (check before dict so nesting works)
-    if isinstance(ann, type) and issubclass(ann, BaseModel):
-        # Convert to dict for traversal; re-instantiate to model at the end so callers get objects
-        if isinstance(value, BaseModel):
-            value = value.model_dump()
-        if not isinstance(value, dict):
-            return value
-        out = dict(value)
-        for field_name, field_info in ann.model_fields.items():
-            if field_name in out and out[field_name] is not None:
-                out[field_name] = _traverse_and_process(
-                    out[field_name],
-                    field_info.annotation,
-                    storage_type,
-                    storage,
-                    input_artifacts,
-                    input_name,
-                    path_trace + [field_name],
-                )
-        # Re-instantiate so tool functions receive model instances (dot notation works)
-        try:
-            return ann.model_validate(out)
-        except Exception as e:
-            logger.warning("Failed to re-instantiate model %s: %s", ann.__name__, e)
-            return out
-
-    # List: use inner type from type args
-    if origin in (list, List) and isinstance(value, (list, tuple)):
-        inner = _normalize_annotation(args[0]) if args else Any
-        return [
-            _traverse_and_process(
-                item, inner, storage_type, storage,
-                input_artifacts, input_name, path_trace + [i])
-            for i, item in enumerate(value)
-        ]
-
-    # Dict: use value type from type args (e.g. Dict[str, Path] processes values as Path)
-    if origin in (dict, Dict) and isinstance(value, dict):
-        value_type = _normalize_annotation(args[1]) if (args and len(args) > 1) else Any
-        return {
-            k: _traverse_and_process(
-                v, value_type, storage_type, storage,
-                input_artifacts, input_name, path_trace + [k])
-            for k, v in value.items()
-        }
-
-    return value
-
-
 def handle_input_artifacts(fn, kwargs, storage):
     storage_type, storage = init_storage(storage)
-    sig = inspect.signature(fn, eval_str=True)
+    sig = inspect.signature(fn)
     input_artifacts = {}
-    new_kwargs = {}
     for name, param in sig.parameters.items():
-        if name not in kwargs:
-            if param.default is not inspect.Parameter.empty:
-                new_kwargs[name] = param.default
-            continue
-        val = kwargs[name]
-        if val is None and _normalize_annotation(param.annotation) != param.annotation:
-            new_kwargs[name] = val
-            continue
-        new_kwargs[name] = _traverse_and_process(
-            val, param.annotation, storage_type, storage,
-            input_artifacts, name)
-    return new_kwargs, input_artifacts
+        if param.annotation is Path or (
+            param.annotation is Optional[Path] and
+                kwargs.get(name) is not None):
+            uri = kwargs[name]
+            scheme, key = parse_uri(uri)
+            if scheme == storage_type:
+                s = storage
+            else:
+                s = storage_dict[scheme]()
+            path = s.download(key, "inputs/%s" % name)
+            logger.info("Artifact %s downloaded to %s" % (
+                uri, path))
+            kwargs[name] = Path(path)
+            input_artifacts[name] = {
+                "storage_type": scheme,
+                "uri": uri,
+            }
+        elif param.annotation is List[Path] or (
+            param.annotation is Optional[List[Path]] and
+                kwargs.get(name) is not None):
+            uris = kwargs[name]
+            new_paths = []
+            for i, uri in enumerate(uris):
+                scheme, key = parse_uri(uri)
+                if scheme == storage_type:
+                    s = storage
+                else:
+                    s = storage_dict[scheme]()
+                dest_dir = Path("inputs") / name / f"item_{i:03d}"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                path = s.download(key, str(dest_dir))
+                new_paths.append(Path(path))
+                logger.info("Artifact %s downloaded to %s" % (
+                    uri, path))
+            kwargs[name] = new_paths
+            input_artifacts[name] = {
+                "storage_type": storage_type,
+                "uri": uris,
+            }
+        elif param.annotation is Dict[str, Path] or (
+            param.annotation is Optional[Dict[str, Path]] and
+                kwargs.get(name) is not None):
+            uris_dict = kwargs[name]
+            new_paths_dict = {}
+            for key_name, uri in uris_dict.items():
+                scheme, key = parse_uri(uri)
+                if scheme == storage_type:
+                    s = storage
+                else:
+                    s = storage_dict[scheme]()
+                path = s.download(key, f"inputs/{name}/{key_name}")
+                new_paths_dict[key_name] = Path(path)
+                logger.info("Artifact %s (key=%s) downloaded to %s" % (
+                    uri, key_name, path))
+            kwargs[name] = new_paths_dict
+            input_artifacts[name] = {
+                "storage_type": storage_type,
+                "uri": uris_dict,
+            }
+        elif param.annotation is Dict[str, List[Path]] or (
+            param.annotation is Optional[Dict[str, List[Path]]] and
+                kwargs.get(name) is not None):
+            uris_dict = kwargs[name]
+            new_paths_dict = {}
+            for key_name, uris in uris_dict.items():
+                new_paths = []
+                for i, uri in enumerate(uris):
+                    scheme, key = parse_uri(uri)
+                    if scheme == storage_type:
+                        s = storage
+                    else:
+                        s = storage_dict[scheme]()
+                    dest_dir = Path("inputs") / name / key_name / f"item_{i:03d}"
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    path = s.download(key, str(dest_dir))
+                    new_paths.append(Path(path))
+                    logger.info("Artifact %s (key=%s) downloaded to %s" % (
+                        uri, key_name, path))
+                new_paths_dict[key_name] = new_paths
+            kwargs[name] = new_paths_dict
+            input_artifacts[name] = {
+                "storage_type": storage_type,
+                "uri": uris_dict,
+            }
+    return kwargs, input_artifacts
 
 
 def handle_output_artifacts(results, exec_id, storage):
@@ -307,57 +275,6 @@ annotation_map = {
 }
 
 
-# Cache for schema models derived from BaseModel (Path -> str in JSON schema)
-_schema_model_cache: Dict[type, type] = {}
-
-def get_schema_annotation(annotation: Any) -> Any:
-    """
-    Map an annotation to the type used in JSON schema (e.g. Path -> str).
-    For BaseModel, build a schema model with the same structure but Path fields as str.
-    Handles List[...], Dict[...], Optional[...] and nested BaseModel recursively.
-    """
-    if annotation is None or annotation is type(None):
-        return annotation
-    origin = get_origin(annotation)
-    if origin is Annotated:
-        return get_schema_annotation(get_args(annotation)[0])
-    if origin is Union:
-        args = get_args(annotation)
-        if type(None) in args:
-            non_none = [a for a in args if a is not type(None)]
-            if len(non_none) == 1:
-                return Optional[get_schema_annotation(non_none[0])]
-    if annotation in annotation_map:
-        return annotation_map[annotation]
-    # List[X] -> List[schema(X)] so e.g. List[BaseModel] becomes List[BaseModelSchema]
-    if origin in (list, List):
-        type_args = get_args(annotation)
-        inner = get_schema_annotation(type_args[0]) if type_args else Any
-        return List[inner]
-    # Dict[K, V] -> Dict[K, schema(V)]
-    if origin in (dict, Dict):
-        type_args = get_args(annotation)
-        if type_args and len(type_args) >= 2:
-            return Dict[type_args[0], get_schema_annotation(type_args[1])]
-        return annotation
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        if annotation not in _schema_model_cache:
-            schema_fields = {}
-            for name, field_info in annotation.model_fields.items():
-                fa = get_schema_annotation(field_info.annotation)
-                if field_info.is_required():
-                    schema_fields[name] = (fa, Field())
-                else:
-                    default = getattr(field_info, "default", None)
-                    schema_fields[name] = (fa, Field(default=default))
-            _schema_model_cache[annotation] = create_model(
-                f"{annotation.__name__}Schema",
-                **schema_fields,
-            )
-        return _schema_model_cache[annotation]
-    return annotation
-
-
 class SubmitResult(BaseModel):
     job_id: str
     extra_info: dict | None = None
@@ -418,8 +335,11 @@ class CalculationMCPServer:
         for n, annotation in \
                 func_arg_metadata.arg_model.__annotations__.items():
             param = params[n]
-            schema_ann = get_schema_annotation(param.annotation)
-            model_params[n] = Annotated[(schema_ann, Field())]
+            if param.annotation in annotation_map:
+                model_params[n] = Annotated[
+                    (annotation_map[param.annotation], Field())]
+            else:
+                model_params[n] = annotation
             if param.default is not inspect.Parameter.empty:
                 model_params[n] = (model_params[n], param.default)
         for n, param in inspect.signature(new_fn).parameters.items():
